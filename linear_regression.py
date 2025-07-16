@@ -1,10 +1,11 @@
 """
 This script performs simple linear regression analysis
-on 2D points data loaded from an Excel file.
-It includes hypothesis testing and plotting of the data.
+in this version the progam is able to work in multidimensional space.
+It includes hypothesis testing and plotting of the data if possible.
 """
 import openpyxl
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 from scipy import stats
 
@@ -16,17 +17,15 @@ def data_loader(file) :
     wb = openpyxl.load_workbook(file)
     ws = wb.active
 
-    x_axis_name = ws['A1'].value
-    y_axis_name = ws['B1'].value
-
+    headers = list(next(ws.iter_rows(min_row=1, max_row=1, values_only=True)))
     x_values = []
     y_values = []
 
-    # Start from the second row (skip headers)
-    for row in ws.iter_rows(min_row=2, max_col=2):
-        x_cell, y_cell = row
+    for row in ws.iter_rows(min_row=2) : # Start from the second row (skip headers)
+        x_cell, y_cell = row[:-1], row[-1]
         try:
-            x = float(x_cell.value)
+            x = list(x_cell)
+            x = [float(i.value) for i in x]
             y = float(y_cell.value)
             x_values.append(x)
             y_values.append(y)
@@ -34,108 +33,128 @@ def data_loader(file) :
             # Skip rows with invalid data
             continue
     wb.close()
-    return x_axis_name, y_axis_name, x_values, y_values
+    return headers, np.array(x_values), np.array(y_values)
 
 def linear_regression(x_values, y_values) :
     """
     Performs simple linear regression and hypothesis testing.
-
     Parameters:
-        x_values (list)
-        y_values (list)
-
+        x_values (numpy array)
+        y_values (numpy array)
     Returns:
         A dictionary containing:
-            - beta (float): Estimated slope.
-            - alpha (float): Estimated intercept.
-            - reject_beta (bool): Whether H0: beta = 0 is rejected.
-            - reject_alpha (bool): Whether H0: alpha = 0 is rejected.
+            - parameter vector (list with float)
+            - reject_wj (list with bool) : Whether H0: wj = 0 is rejected.
             - r2 (float): R-squared score shows how well the model fits the data.
             - mse (float): Mean squared error of the points.
     """
-    n = len(x_values)
-    x_values = np.array(x_values)
-    y_values = np.array(y_values)
-    x_sum = sum(x_values)
-    y_sum = sum(y_values)
-    sum_xy = np.sum(x_values * y_values)
-    sum_x2 = np.sum(x_values ** 2)
-
-    # Calculate regression coefficients
-    beta_hat = (sum_xy-(x_sum*y_sum/n)) / (sum_x2-(x_sum**2/n))
-    alpha_hat = (y_sum / n) - (beta_hat*(x_sum / n))
-
-    sxx = sum((i - (x_sum / n))**2 for i in x_values)
-    syy = sum(((i - (y_sum / n))**2) for i in y_values)
-    sxy = sum_xy - (x_sum*y_sum)/n
-
-    mse = (syy - beta_hat*sxy)/(n-2)
-    r2_score = 1 - ((syy - beta_hat*sxy)/syy)
-
-    t_crit = stats.t.ppf(1-0.025, n-2)
-    reject_beta_h0 = abs(beta_hat/np.sqrt(mse/sxx)) > t_crit
-    reject_alpha_h0 = abs(alpha_hat/np.sqrt(mse*((1/n)+((x_sum / n)**2)/sxx))) > t_crit
-
+    n =len(x_values)
+    # Add a term for w0
+    x = np.c_[np.ones((len(x_values), 1)), x_values]
+    # Compute weights or the parameters vector (w = (X^T X)^-1 X^T y)
+    w = np.linalg.inv(x.T @ x) @ x.T @ y_values
+    y_predictor = x @ w
+    # Calculate mse and r^2 score
+    mse = (np.sum((y_predictor - y_values) ** 2))*(1/(n-2))
+    ss_res = np.sum((y_values - y_predictor) ** 2)
+    ss_tot = np.sum((y_values - np.mean(y_values)) ** 2)
+    r2_score = 1 - ss_res / ss_tot
+    # Find the std of the parameter vector
+    xtx_inv = np.linalg.inv(x.T @ x)
+    std_w = np.sqrt(mse * np.diag(xtx_inv))
+    # Find which parameters null hypothesis get rejected (H0 = 0)
+    t_crit = stats.t.ppf(1 - 0.025, df=n-2)
+    hypothesis_reject = [
+    abs(w[i]/std_w[i]) > t_crit for i in range(len(w))]
     return {
-        'beta': beta_hat,
-        'alpha': alpha_hat,
-        'reject_beta': reject_beta_h0,
-        'reject_alpha': reject_alpha_h0,
-        'r2': r2_score,
+        'parameter_vector' : w,
+        'hyphthesis_reject' : hypothesis_reject,
+        'r^2_score': r2_score,
         'MSE' : mse }
 
-def plot(x_axis_name, y_axis_name, x_values, y_values) :
+def plot(x_values, y_values, headers):
     """
-    Plots the data points and the fitted linear regression line.
+    Plots the data points and the fitted regression model.
+    Supports:
+        - 2D plot when x_values has one feature
+        - 3D surface plot when x_values has two features
 
     Parameters:
-        x_axis_name (str): Label for the x-axis.
-        y_axis_name (str): Label for the y-axis.
-        x_values (list)
-        y_values (list)
+        x_values (np.array): Feature values (n_samples, n_features)
+        y_values (np.array): Target values (n_samples,)
+        headers (list): Column names from the Excel file
     """
     result = linear_regression(x_values, y_values)
-    # Create regression line points
-    x_min, x_max = min(x_values), max(x_values)
-    x_range = np.linspace(x_min, x_max, 100)
-    y_pred = [result['beta']*x + result['alpha'] for x in x_range]
+    w = result['parameter_vector']
+    r2 = result['r^2_score']
+    mse = result['MSE']
+    rejects = result['hyphthesis_reject']
 
-    # Create the plot
-    plt.figure(figsize=(10, 6))
+    n_features = x_values.shape[1]
 
-    # Plot the data points
-    plt.scatter(x_values, y_values, color='blue', label='Data Points')
+    # 2D LINE PLOT (1 feature)
+    if n_features == 1:
+        x_min, x_max = x_values.min(), x_values.max()
+        x_range = np.linspace(x_min, x_max, 100).reshape(-1, 1)
+        x_range_bias = np.c_[np.ones((100, 1)), x_range]
+        y_pred = x_range_bias @ w
 
-    # Plot the regression line
-    text = f"Regression Line: y = {result['beta']:.3f}x + {result['alpha']:.3f}"
-    plt.plot(x_range, y_pred, color='red', label=text)
+        plt.figure(figsize=(10, 6))
+        plt.scatter(x_values, y_values, color='blue', label='Data Points')
+        plt.plot(x_range, y_pred, color='red', label=f"y = {w[1]:.3f}x + {w[0]:.3f}")
 
-    # Build annotation text
-    info_text = (
-        f"$R^2$ = {result['r2']:.3f}\n"
-        f"MSE = {result['MSE']:.3f}\n"
-        f"H₀: β = 0 → {'Rejected' if result['reject_beta'] else 'Not rejected'}\n"
-        f"H₀: α = 0 → {'Rejected' if result['reject_alpha'] else 'Not rejected'}"
-    )
+        info_text = (
+            f"$R^2$ = {r2:.3f}\n"
+            f"MSE = {mse:.3f}\n"
+            f"H₀: w₀ = 0 → {'Rejected' if rejects[0] else 'Not rejected'}\n"
+            f"H₀: w₁ = 0 → {'Rejected' if rejects[1] else 'Not rejected'}")
 
-    # Add text box to the plot
-    plt.text(
-        0.05, 0.95, info_text,
-        transform=plt.gca().transAxes,
-        fontsize=10,
-        verticalalignment='top',
-        bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
+        plt.text(0.05, 0.95, info_text,
+                transform=plt.gca().transAxes,
+                fontsize=10,
+                verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
 
-    # Add labels and title
-    plt.xlabel(x_axis_name)
-    plt.ylabel(y_axis_name)
-    plt.title('Linear Regression Analysis')
-    plt.legend()
-    plt.grid(True)
+        plt.xlabel(headers[0])
+        plt.ylabel(headers[-1])
+        plt.title("2D Linear Regression")
+        plt.legend()
+        plt.grid(True)
+        plt.show()
 
-    # Show the plot
-    plt.show()
+    # 3D SURFACE PLOT (2 features)
+    elif n_features == 2:
+        fig = plt.figure(figsize=(10, 7))
+        ax = fig.add_subplot(111, projection='3d')
 
-if __name__ == '__main__' :
-    xname, yname, x, y = data_loader('points.xlsx')
-    plot(xname, yname, x, y)
+        x1 = x_values[:, 0]
+        x2 = x_values[:, 1]
+        ax.scatter(x1, x2, y_values, color='blue', label='Data Points')
+
+        # Create grid for surface
+        x1_range = np.linspace(x1.min(), x1.max(), 30)
+        x2_range = np.linspace(x2.min(), x2.max(), 30)
+        x1_grid, x2_grid = np.meshgrid(x1_range, x2_range)
+        x1x2_flat = np.c_[np.ones(x1_grid.size), x1_grid.ravel(), x2_grid.ravel()]
+        y_pred_flat = x1x2_flat @ w
+        y_grid = y_pred_flat.reshape(x1_grid.shape)
+
+        ax.plot_surface(x1_grid, x2_grid, y_grid, color='red', alpha=0.5, label="Regression Surface")
+
+        ax.set_xlabel(headers[0])
+        ax.set_ylabel(headers[1])
+        ax.set_zlabel(headers[-1])
+        ax.set_title("3D Linear Regression")
+
+        plt.tight_layout()
+        plt.show()
+
+    # ❌ MORE THAN 2 FEATURES
+    else:
+        print("❌ Cannot plot when there are more than 2 input features.")
+        print("Use dimensionality reduction (e.g., PCA) or drop features for visualization.")
+
+if __name__ == '__main__':
+    headers, x, y = data_loader('points.xlsx')
+    linear_regression(x, y)
+    plot(x, y, headers)
