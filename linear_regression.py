@@ -10,9 +10,7 @@ import numpy as np
 from scipy import stats
 
 def data_loader(file) :
-    """
-    Reads the excel file and returns the names of the variables and their reletive data.
-    """
+    # Reads the excel file and returns the names of the variables and their reletive shuffeled data.
     # Load data from Excel
     wb = openpyxl.load_workbook(file)
     ws = wb.active
@@ -21,17 +19,19 @@ def data_loader(file) :
     x_values = []
     y_values = []
 
-    for row in ws.iter_rows(min_row=2) : # Start from the second row (skip headers)
-        x_cell, y_cell = row[:-1], row[-1]
-        try:
-            x = list(x_cell)
-            x = [float(i.value) for i in x]
-            y = float(y_cell.value)
+    for row in ws.iter_rows(min_row=2, values_only=True) :
+        try :
+            x = [float(i) for i in row]
             x_values.append(x)
-            y_values.append(y)
         except (TypeError, ValueError):
-            # Skip rows with invalid data
-            continue
+            continue # Skip rows with invalid data
+
+    np.random.seed(42)
+    np.random.shuffle(x_values)
+    for i in x_values :
+        y_values.append(i[-1])
+    x_values = [i[:-1] for i in x_values]
+
     wb.close()
     return headers, np.array(x_values), np.array(y_values)
 
@@ -55,7 +55,7 @@ def linear_regression(x_values, y_values) :
     w = np.linalg.inv(x.T @ x) @ x.T @ y_values
     y_predictor = x @ w
     # Calculate mse and r^2 score
-    mse = (np.sum((y_predictor - y_values) ** 2))*(1/(n-2))
+    mse = (np.sum((y_predictor - y_values) ** 2))*(1/(n-(len(w))))
     ss_res = np.sum((y_values - y_predictor) ** 2)
     ss_tot = np.sum((y_values - np.mean(y_values)) ** 2)
     r2_score = 1 - ss_res / ss_tot
@@ -66,9 +66,13 @@ def linear_regression(x_values, y_values) :
     t_crit = stats.t.ppf(1 - 0.025, df=n-2)
     hypothesis_reject = [
     abs(w[i]/std_w[i]) > t_crit for i in range(len(w))]
+    equ_str = f'{w[0]:.4f}'
+    for par, coef in enumerate(w[1:], start=1):
+        if coef != 0: poly_str += f' + {coef:.4f}x_{par}'
     return {
+        'equation' : equ_str,
         'parameter_vector' : w,
-        'hyphthesis_reject' : hypothesis_reject,
+        'hypothesis_reject' : hypothesis_reject,
         'r^2_score': r2_score,
         'MSE' : mse }
 
@@ -145,16 +149,23 @@ def plot(x_values, y_values, headers):
         ax.set_ylabel(headers[1])
         ax.set_zlabel(headers[-1])
         ax.set_title("3D Linear Regression")
+        info_text = (
+        f"$R^2$ = {r2:.3f}\n"
+        f"MSE = {mse:.3f}\n"
+        f"H₀: w₀ = 0 → {'Rejected' if rejects[0] else 'Not rejected'}\n"
+        f"H₀: w₁ = 0 → {'Rejected' if rejects[1] else 'Not rejected'}\n"
+        f"H₀: w₂ = 0 → {'Rejected' if rejects[2] else 'Not rejected'}")
+        ax.text2D(0.05, 0.95, info_text, transform=ax.transAxes, fontsize=10,
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
 
         plt.tight_layout()
         plt.show()
 
-    # ❌ MORE THAN 2 FEATURES
+    # MORE THAN 2 FEATURES
     else:
         print("❌ Cannot plot when there are more than 2 input features.")
         print("Use dimensionality reduction (e.g., PCA) or drop features for visualization.")
 
 if __name__ == '__main__':
     headers, x, y = data_loader('points.xlsx')
-    linear_regression(x, y)
     plot(x, y, headers)
