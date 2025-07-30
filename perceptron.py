@@ -13,6 +13,10 @@ class Perceptron :
         self.weights = None
         self.learning_rate = learning_rate
         self.n_epochs = n_epochs
+        self.accuracy = None
+        self.sensitivity = None
+        self.specificity = None
+        self.percision = None
 
     def build(self, x, y) :
         """
@@ -35,6 +39,18 @@ class Perceptron :
                     self.bias += update
             if errors == 0 : # The model is good to use if there are no errors
                 break
+        # Some metrics to analys the performans of the model
+        TP = FP = TN = FN = 0
+        for i, j in zip(x, y) :
+            y_predict = self.predict(i.reshape(1, -1)).ravel()[0]
+            if j == y_predict and j == 1 : TP += 1
+            if j != y_predict and j == 0 : FP += 1
+            if j == y_predict and j == 0 : TN += 1
+            if j != y_predict and j == 1 : FN += 1
+        self.accuracy = (TP + TN)/ len(x)
+        self.sensitivity = TP / (TP + FN)
+        self.specificity = TN / (TN + FP)
+        self.percision = TP / (TP + FP)
 
     def predict(self, x) :
         """
@@ -65,6 +81,8 @@ def plot_decision_boundary(x, y):
     x_vals = np.linspace(np.min(x[:, 0]), np.max(x[:, 0]), 100)
     y_vals = (-model.weights[0] * x_vals - model.bias) / model.weights[1]
     plt.plot(x_vals, y_vals, 'k--', label='Decision Boundary')
+    plt.xlim(np.min(x[:, 0]) - 1, np.max(x[:, 0]) + 1)
+    plt.ylim(np.min(x[:, 1]) - 1, np.max(x[:, 1]) + 1)
 
     plt.xlabel('Feature 1')
     plt.ylabel('Feature 2')
